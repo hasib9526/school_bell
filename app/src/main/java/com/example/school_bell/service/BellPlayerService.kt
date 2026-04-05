@@ -100,9 +100,11 @@ class BellPlayerService : Service() {
                 }
             }
 
-            // Hard stop after 1 minute regardless
+            // Bell: hard stop after 1 minute. Azan: play fully (no forced stop)
             stopHandler.removeCallbacks(stopRunnable)
-            stopHandler.postDelayed(stopRunnable, MAX_DURATION_MS)
+            if (!isAzan) {
+                stopHandler.postDelayed(stopRunnable, MAX_DURATION_MS)
+            }
 
         } catch (e: Exception) {
             stopSelf()
