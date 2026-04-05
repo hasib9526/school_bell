@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme - uses NoActionBar so Compose handles everything -->
+    <style name="Theme.SchoolBell" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/deep_navy</item>
+        <item name="android:navigationBarColor">@color/deep_navy</item>
+        <item name="android:windowBackground">@color/deep_navy</item>
+    </style>
+
+    <!-- Splash screen style -->
+    <style name="Theme.SchoolBell.Splash" parent="Theme.SchoolBell">
+        <item name="android:windowBackground">@color/deep_navy</item>
+    </style>
+</resources>

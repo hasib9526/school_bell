@@ -1,0 +1,96 @@
+<resources>
+    <string name="app_name">Smart School Bell</string>
+    <string name="app_full_name">Smart School Bell &amp; Azan System</string>
+
+    <!-- Navigation -->
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_schedule">Schedule</string>
+    <string name="nav_azan">Azan</string>
+    <string name="nav_announcement">Announcement</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Device Admin -->
+    <string name="device_admin_label">School Bell Device Admin</string>
+    <string name="device_admin_description">Allows the School Bell system to lock the device and manage kiosk mode.</string>
+
+    <!-- Dashboard -->
+    <string name="next_bell">Next Bell</string>
+    <string name="next_azan">Next Azan</string>
+    <string name="battery_status">Battery Status</string>
+    <string name="kiosk_mode">Kiosk Mode</string>
+    <string name="kiosk_enabled">Kiosk Enabled</string>
+    <string name="kiosk_disabled">Kiosk Disabled</string>
+    <string name="live_announcement">Live Announcement</string>
+    <string name="no_upcoming_bells">No upcoming bells</string>
+    <string name="no_upcoming_azan">No upcoming prayers</string>
+
+    <!-- Schedule -->
+    <string name="add_schedule">Add Schedule</string>
+    <string name="edit_schedule">Edit Schedule</string>
+    <string name="delete_schedule">Delete Schedule</string>
+    <string name="bell_label">Bell Label</string>
+    <string name="bell_time">Bell Time</string>
+    <string name="days_of_week">Days of Week</string>
+    <string name="sound_file">Sound File</string>
+    <string name="routine_type">Routine Type</string>
+    <string name="enabled">Enabled</string>
+    <string name="disabled">Disabled</string>
+    <string name="school_bell">School Bell</string>
+
+    <!-- Azan -->
+    <string name="azan_title">Prayer Times</string>
+    <string name="recalculate">Recalculate Prayer Times</string>
+    <string name="calculation_method">Calculation Method</string>
+    <string name="gps_coordinates">GPS Coordinates</string>
+    <string name="fajr">Fajr</string>
+    <string name="dhuhr">Dhuhr</string>
+    <string name="asr">Asr</string>
+    <string name="maghrib">Maghrib</string>
+    <string name="isha">Isha</string>
+
+    <!-- Announcement -->
+    <string name="announcements">Announcements</string>
+    <string name="server_connected">Connected</string>
+    <string name="server_disconnected">Disconnected</string>
+    <string name="test_play">Test Play</string>
+    <string name="last_received">Last Received</string>
+    <string name="no_announcements">No announcements yet</string>
+
+    <!-- Settings -->
+    <string name="settings">Settings</string>
+    <string name="server_url">Server URL</string>
+    <string name="school_name">School Name</string>
+    <string name="device_id">Device ID</string>
+    <string name="azan_enabled">Azan Enabled</string>
+    <string name="sound_sync_interval">Sound Sync Interval</string>
+    <string name="logout">Logout</string>
+    <string name="app_version">App Version</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm">Confirm</string>
+
+    <!-- Login -->
+    <string name="login">Connect to Server</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="connect">Connect</string>
+    <string name="connecting">Connecting…</string>
+    <string name="login_success">Connected successfully</string>
+    <string name="login_failed">Connection failed</string>
+
+    <!-- Notifications -->
+    <string name="bell_channel_name">School Bell Alerts</string>
+    <string name="bell_channel_desc">Notifications for school bell events</string>
+    <string name="monitoring_channel_name">Device Monitoring</string>
+    <string name="monitoring_channel_desc">Background monitoring service</string>
+    <string name="announcement_channel_name">Announcements</string>
+    <string name="announcement_channel_desc">Live announcement notifications</string>
+
+    <!-- General -->
+    <string name="ok">OK</string>
+    <string name="error">Error</string>
+    <string name="loading">Loading…</string>
+    <string name="retry">Retry</string>
+    <string name="minutes_abbr">min</string>
+    <string name="hours_abbr">h</string>
+</resources>
