@@ -6,8 +6,10 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.example.school_bell.azan.AzanScheduler
 import com.example.school_bell.data.db.AppDatabase
 import com.example.school_bell.data.db.entities.BellSchedule
+import com.example.school_bell.data.prefs.AppPreferences
 import com.example.school_bell.service.BellPlayerService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -85,12 +87,28 @@ class AlarmReceiver : BroadcastReceiver() {
         val soundFile = intent.getStringExtra(EXTRA_SOUND_FILE) ?: "default_bell.mp3"
         val bellLabel = intent.getStringExtra(EXTRA_BELL_LABEL) ?: "School Bell"
 
+        // Detect if this is an Azan alarm
+        val isAzan = bellLabel.startsWith("Azan:")
+
         // Start the player service
-        val serviceIntent = BellPlayerService.createIntent(context, soundFile, bellLabel)
+        val serviceIntent = BellPlayerService.createIntent(context, soundFile, bellLabel, isAzan)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(serviceIntent)
         } else {
             context.startService(serviceIntent)
+        }
+
+        // If last azan of the day (Isha), schedule tomorrow's azan
+        if (isAzan && bellLabel.contains("Isha", ignoreCase = true)) {
+            CoroutineScope(Dispatchers.IO).launch {
+                val prefs  = AppPreferences(context)
+                val lat    = prefs.latitude.first()
+                val lon    = prefs.longitude.first()
+                val method = prefs.calcMethod.first()
+                if (lat != 0.0 || lon != 0.0) {
+                    AzanScheduler(context).calculateAndSchedule(lat, lon, method)
+                }
+            }
         }
 
         // Reschedule for next occurrence

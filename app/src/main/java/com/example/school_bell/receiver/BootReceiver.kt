@@ -6,7 +6,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.example.school_bell.azan.AzanScheduler
 import com.example.school_bell.data.db.AppDatabase
+import com.example.school_bell.data.prefs.AppPreferences
 import com.example.school_bell.service.MonitoringService
 import com.example.school_bell.worker.SoundSyncWorker
 import kotlinx.coroutines.CoroutineScope
@@ -37,8 +39,20 @@ class BootReceiver : BroadcastReceiver() {
         // Reschedule all active alarms
         CoroutineScope(Dispatchers.IO).launch {
             rescheduleAlarms(context)
+            rescheduleAzan(context)
             SoundSyncWorker.schedule(context)
         }
+    }
+
+    private suspend fun rescheduleAzan(context: Context) {
+        val prefs = AppPreferences(context)
+        val lat    = prefs.latitude.first()
+        val lon    = prefs.longitude.first()
+        val method = prefs.calcMethod.first()
+        if (lat == 0.0 && lon == 0.0) return
+
+        // Recalculate & reschedule today's azan
+        AzanScheduler(context).calculateAndSchedule(lat, lon, method)
     }
 
     private suspend fun rescheduleAlarms(context: Context) {

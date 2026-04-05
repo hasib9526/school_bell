@@ -17,8 +17,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import android.content.Intent
+import android.os.Build
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import com.example.school_bell.service.BellPlayerService
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -97,6 +100,22 @@ fun DashboardScreen(viewModel: DashboardViewModel = viewModel()) {
                 isEnabled = state.isKioskEnabled,
                 onToggle = { viewModel.toggleKiosk(it) }
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Test buttons row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                TestBellButton(modifier = Modifier.weight(1f))
+                TestAzanButton(modifier = Modifier.weight(1f))
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Stop button
+            StopSoundButton()
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -381,5 +400,70 @@ private fun AnnouncementBanner(title: String, message: String) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TestBellButton(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    Button(
+        onClick = {
+            val intent = BellPlayerService.createIntent(context, "default_bell.mp3", "Test Bell")
+            if (Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        },
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(containerColor = TealDark),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Icon(Icons.Filled.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Test Bell", fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun TestAzanButton(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    Button(
+        onClick = {
+            val intent = BellPlayerService.createIntent(context, "azan.mp3", "Test Azan", isAzan = true)
+            if (Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        },
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(containerColor = GoldDark),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Icon(Icons.Filled.Star, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Test Azan", fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun StopSoundButton() {
+    val context = LocalContext.current
+    OutlinedButton(
+        onClick = {
+            val intent = Intent(context, BellPlayerService::class.java).apply {
+                action = BellPlayerService.ACTION_STOP
+            }
+            context.startService(intent)
+        },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
+        border = androidx.compose.foundation.BorderStroke(1.dp, StatusRed)
+    ) {
+        Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Stop Sound", fontWeight = FontWeight.SemiBold)
     }
 }

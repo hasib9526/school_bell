@@ -26,6 +26,7 @@ data class DashboardUiState(
     val nextBellMinutesAway: Long = -1,
     val nextAzanName: String = "",
     val nextAzanMinutesAway: Long = -1,
+    val nextAzanTimeMs: Long = -1,      // exact epoch ms of next azan
     val batteryLevel: Int = 100,
     val isBatteryCharging: Boolean = false,
     val isKioskEnabled: Boolean = false,
@@ -91,25 +92,43 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
                 .format(Calendar.getInstance().time)
             db.azanTimeDao().getAzanTimesForDate(today).collect { azanTimes ->
-                val now = Calendar.getInstance()
-                val nextAzan = azanTimes
-                    .filter { it.isEnabled }
-                    .firstOrNull { azan ->
-                        azan.hour > now.get(Calendar.HOUR_OF_DAY) ||
-                                (azan.hour == now.get(Calendar.HOUR_OF_DAY) &&
-                                        azan.minute > now.get(Calendar.MINUTE))
-                    }
-                if (nextAzan != null) {
-                    val minutesAway = ((nextAzan.hour - now.get(Calendar.HOUR_OF_DAY)) * 60 +
-                            (nextAzan.minute - now.get(Calendar.MINUTE))).toLong()
-                    _uiState.update {
-                        it.copy(
-                            nextAzanName = nextAzan.prayerName,
-                            nextAzanMinutesAway = minutesAway
-                        )
-                    }
-                }
+                updateNextAzanFromList(azanTimes.filter { it.isEnabled })
             }
+        }
+    }
+
+    private fun updateNextAzanFromList(azanTimes: List<com.example.school_bell.data.db.entities.AzanTime>) {
+        val now = Calendar.getInstance()
+        val nowMs = now.timeInMillis
+
+        val nextAzan = azanTimes.firstOrNull { azan ->
+            // Build epoch ms for this azan today
+            val azanCal = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, azan.hour)
+                set(Calendar.MINUTE, azan.minute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            azanCal.timeInMillis > nowMs
+        }
+
+        if (nextAzan != null) {
+            val azanCal = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, nextAzan.hour)
+                set(Calendar.MINUTE, nextAzan.minute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val minutesAway = (azanCal.timeInMillis - nowMs) / 60_000L
+            _uiState.update {
+                it.copy(
+                    nextAzanName = nextAzan.prayerName,
+                    nextAzanTimeMs = azanCal.timeInMillis,
+                    nextAzanMinutesAway = minutesAway
+                )
+            }
+        } else {
+            _uiState.update { it.copy(nextAzanName = "", nextAzanTimeMs = -1, nextAzanMinutesAway = -1) }
         }
     }
 
@@ -146,9 +165,15 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun updateNextAzanCountdown() {
-        val minutesAway = _uiState.value.nextAzanMinutesAway
-        if (minutesAway > 0) {
-            _uiState.update { it.copy(nextAzanMinutesAway = minutesAway - 1) }
+        val azanTimeMs = _uiState.value.nextAzanTimeMs
+        if (azanTimeMs <= 0) return
+
+        val minutesAway = (azanTimeMs - System.currentTimeMillis()) / 60_000L
+        if (minutesAway < 0) {
+            // This azan has passed — refresh from DB to get next one
+            _uiState.update { it.copy(nextAzanName = "", nextAzanTimeMs = -1, nextAzanMinutesAway = -1) }
+        } else {
+            _uiState.update { it.copy(nextAzanMinutesAway = minutesAway) }
         }
     }
 
