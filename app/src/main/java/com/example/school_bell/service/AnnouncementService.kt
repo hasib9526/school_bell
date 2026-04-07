@@ -5,7 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -21,7 +25,7 @@ import kotlinx.coroutines.flow.first
 class AnnouncementService : Service() {
 
     companion object {
-        const val CHANNEL_ID = "ANNOUNCEMENT_CHANNEL"
+        const val CHANNEL_ID    = "ANNOUNCEMENT_CHANNEL"
         const val NOTIFICATION_ID = 1003
         private const val POLL_INTERVAL_MS = 30_000L
     }
@@ -31,9 +35,27 @@ class AnnouncementService : Service() {
     private var lastAnnouncementId: Long = -1
     private lateinit var preferences: AppPreferences
 
+    // Audio focus — announcement uses AUDIOFOCUS_GAIN to interrupt any playing bell
+    private lateinit var audioManager: AudioManager
+    private var audioFocusRequest: AudioFocusRequest? = null   // API 26+
+    private var legacyFocusListener: AudioManager.OnAudioFocusChangeListener? = null
+
+    private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                player?.pause()
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                player?.play()
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         preferences = AppPreferences(this)
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Monitoring announcements…"))
         startPolling()
@@ -74,6 +96,14 @@ class AnnouncementService : Service() {
 
     private fun playAnnouncementAudio(audioUrl: String) {
         try {
+            // Step 1: Stop any currently playing bell immediately
+            stopCurrentBell()
+
+            // Step 2: Request AUDIOFOCUS_GAIN — this causes the bell service (which holds
+            // AUDIOFOCUS_GAIN_TRANSIENT) to receive AUDIOFOCUS_LOSS and stop on its own.
+            if (!requestAudioFocus()) return
+
+            // Step 3: Play the announcement audio
             releasePlayer()
             player = ExoPlayer.Builder(this).build()
             val mediaItem = MediaItem.fromUri(audioUrl)
@@ -81,11 +111,69 @@ class AnnouncementService : Service() {
                 setMediaItem(mediaItem)
                 prepare()
                 play()
+                addListener(object : androidx.media3.common.Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == androidx.media3.common.Player.STATE_ENDED ||
+                            playbackState == androidx.media3.common.Player.STATE_IDLE
+                        ) {
+                            abandonAudioFocus()
+                        }
+                    }
+                })
             }
         } catch (e: Exception) {
-            // Audio playback failed gracefully
+            abandonAudioFocus()
         }
     }
+
+    /** Sends a stop command directly to BellPlayerService for immediate interruption. */
+    private fun stopCurrentBell() {
+        val stopIntent = Intent(this, BellPlayerService::class.java).apply {
+            action = BellPlayerService.ACTION_STOP
+        }
+        stopService(stopIntent)
+    }
+
+    // ── Audio focus ───────────────────────────────────────────────────────────
+
+    private fun requestAudioFocus(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .setOnAudioFocusChangeListener(focusChangeListener)
+                .build()
+            audioFocusRequest = req
+            audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            legacyFocusListener = focusChangeListener
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(
+                focusChangeListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            audioFocusRequest = null
+        } else {
+            legacyFocusListener?.let {
+                @Suppress("DEPRECATION")
+                audioManager.abandonAudioFocus(it)
+            }
+            legacyFocusListener = null
+        }
+    }
+
+    // ── Notification ──────────────────────────────────────────────────────────
 
     private fun showAnnouncementNotification(announcement: AnnouncementResponse) {
         val manager = getSystemService(NotificationManager::class.java)
@@ -157,6 +245,7 @@ class AnnouncementService : Service() {
     override fun onDestroy() {
         serviceScope.cancel()
         releasePlayer()
+        abandonAudioFocus()
         super.onDestroy()
     }
 

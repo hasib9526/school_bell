@@ -121,6 +121,8 @@ class AzanViewModel(application: Application) : AndroidViewModel(application) {
                     val lon = location.longitude
                     preferences.saveLocation(lat, lon)
                     _uiState.update { it.copy(latitude = lat, longitude = lon) }
+                    // Pre-calculate 30 days for offline scheduling, then schedule today
+                    azanScheduler.preCalculate30Days(lat, lon, _uiState.value.calcMethod)
                     scheduleAzan(lat, lon, _uiState.value.calcMethod)
                 } else {
                     _uiState.update { it.copy(isLoading = false, error = "Could not get location") }

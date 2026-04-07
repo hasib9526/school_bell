@@ -26,6 +26,14 @@ interface AzanTimeDao {
     """)
     suspend fun getNextAzanToday(date: String, currentHour: Int, currentMinute: Int): AzanTime?
 
+    /** Non-flow version — used for offline cache checks. */
+    @Query("SELECT * FROM azan_times WHERE date = :date ORDER BY hour ASC, minute ASC")
+    suspend fun getTimesForDateOnce(date: String): List<AzanTime>
+
+    /** Count of stored prayer times for a specific date — used to verify 30-day cache. */
+    @Query("SELECT COUNT(*) FROM azan_times WHERE date = :date")
+    suspend fun getCountForDate(date: String): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(azanTime: AzanTime): Long
 
@@ -40,6 +48,10 @@ interface AzanTimeDao {
 
     @Query("DELETE FROM azan_times WHERE date = :date")
     suspend fun deleteForDate(date: String)
+
+    /** Remove prayer time records older than cutoffDate (yyyy-MM-dd). */
+    @Query("DELETE FROM azan_times WHERE date < :cutoffDate")
+    suspend fun deleteOldDates(cutoffDate: String)
 
     @Query("UPDATE azan_times SET isEnabled = :enabled WHERE id = :id")
     suspend fun setEnabled(id: Long, enabled: Boolean)

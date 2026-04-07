@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
@@ -48,14 +49,36 @@ class BellPlayerService : Service() {
     private val stopHandler  = Handler(Looper.getMainLooper())
     private val stopRunnable = Runnable { stopSelf() }
 
+    // Audio focus
+    private lateinit var audioManager: AudioManager
+    private var audioFocusRequest: AudioFocusRequest? = null  // API 26+
+    private var legacyFocusListener: AudioManager.OnAudioFocusChangeListener? = null
+
+    private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                // Permanent loss (e.g., announcement started) — stop bell
+                stopSelf()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                // Temporary loss (e.g., phone call) — pause
+                mediaPlayer?.pause()
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                // Focus returned — resume if still playing
+                mediaPlayer?.let { if (!it.isPlaying) it.start() }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         ensureNotificationChannel()
         acquireWakeLock()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Stop action from notification button
         if (intent?.action == ACTION_STOP) {
             stopSelf()
             return START_NOT_STICKY
@@ -66,9 +89,54 @@ class BellPlayerService : Service() {
         val isAzan    = intent?.getBooleanExtra(EXTRA_IS_AZAN, false) ?: false
 
         startForeground(NOTIFICATION_ID, buildNotification(label, isAzan))
-        playSound(soundFile, isAzan)
+
+        if (requestAudioFocus()) {
+            playSound(soundFile, isAzan)
+        } else {
+            stopSelf()
+        }
 
         return START_NOT_STICKY
+    }
+
+    // ── Audio focus ───────────────────────────────────────────────────────────
+
+    private fun requestAudioFocus(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                .setOnAudioFocusChangeListener(focusChangeListener)
+                .setAcceptsDelayedFocusGain(false)
+                .build()
+            audioFocusRequest = req
+            audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            legacyFocusListener = focusChangeListener
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(
+                focusChangeListener,
+                AudioManager.STREAM_ALARM,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            audioFocusRequest = null
+        } else {
+            legacyFocusListener?.let {
+                @Suppress("DEPRECATION")
+                audioManager.abandonAudioFocus(it)
+            }
+            legacyFocusListener = null
+        }
     }
 
     // ── Sound logic ───────────────────────────────────────────────────────────
@@ -80,10 +148,8 @@ class BellPlayerService : Service() {
             val customFile = File(File(filesDir, "sounds"), soundFileName)
 
             when {
-                // Priority 1: user-provided file in filesDir/sounds/
                 customFile.exists() -> playFromFile(customFile)
 
-                // Priority 2: bundled raw resource (res/raw/azan.mp3 or res/raw/bell.mp3)
                 isAzan -> {
                     val rawId = resources.getIdentifier("azan", "raw", packageName)
                     if (rawId != 0) playFromRaw(rawId)
@@ -163,7 +229,6 @@ class BellPlayerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Stop action pending intent
         val stopPi = PendingIntent.getService(
             this, 1,
             Intent(this, BellPlayerService::class.java).apply { action = ACTION_STOP },
@@ -177,11 +242,7 @@ class BellPlayerService : Service() {
             .setContentIntent(openPi)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true)
-            .addAction(
-                android.R.drawable.ic_media_pause,
-                "Stop",
-                stopPi
-            )
+            .addAction(android.R.drawable.ic_media_pause, "Stop", stopPi)
             .build()
     }
 
@@ -213,6 +274,7 @@ class BellPlayerService : Service() {
     override fun onDestroy() {
         stopHandler.removeCallbacks(stopRunnable)
         releasePlayer()
+        abandonAudioFocus()
         wakeLock?.let { if (it.isHeld) it.release() }
         super.onDestroy()
     }

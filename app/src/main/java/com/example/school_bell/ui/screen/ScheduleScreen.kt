@@ -5,9 +5,11 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -256,8 +258,11 @@ private fun ScheduleCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Days chips
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Days chips — horizontally scrollable for small screens
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 dayNames.forEachIndexed { index, day ->
                     val active = schedule.days and (1 shl index) != 0
                     Surface(
@@ -357,9 +362,12 @@ private fun ScheduleDialog(
                     NumberPicker(label = "Min", value = minute, range = 0..59, onValueChange = { minute = it })
                 }
 
-                // Days selector
+                // Days selector — horizontally scrollable for small screens
                 Text("Days:", color = TextSecondary, style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     dayNames.forEachIndexed { index, day ->
                         val active = index in selectedDays
                         FilterChip(

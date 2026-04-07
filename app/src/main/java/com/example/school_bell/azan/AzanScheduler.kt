@@ -15,7 +15,8 @@ class AzanScheduler(private val context: Context) {
 
     companion object {
         private const val AZAN_REQUEST_CODE_BASE = 2000
-        private val DATE_FORMAT = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        private const val PRE_CALC_DAYS = 30
+        val DATE_FORMAT = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val PRAYER_NAMES = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
 
         // Triple(fajrAngle, ishaAngle, ishaMinutesAfterMaghrib)
@@ -37,6 +38,65 @@ class AzanScheduler(private val context: Context) {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
+    /**
+     * Pre-calculates prayer times for today + next [PRE_CALC_DAYS]-1 days and stores them
+     * in the local database. Existing entries for a date are skipped (cached).
+     * After storing, schedules today's remaining prayer alarms.
+     *
+     * This is the "offline 30-day" implementation: once called with a valid GPS location,
+     * the device no longer needs GPS or network for 30 days of prayer scheduling.
+     */
+    suspend fun preCalculate30Days(
+        latitude: Double,
+        longitude: Double,
+        methodName: String
+    ) {
+        if (latitude == 0.0 && longitude == 0.0) return
+
+        val db = AppDatabase.getInstance(context)
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val today = Calendar.getInstance()
+        val todayStr = DATE_FORMAT.format(today.time)
+
+        // Remove stale records older than today
+        db.azanTimeDao().deleteOldDates(todayStr)
+
+        val toInsert = mutableListOf<AzanTime>()
+
+        for (dayOffset in 0 until PRE_CALC_DAYS) {
+            val cal = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, dayOffset) }
+            val dateStr = DATE_FORMAT.format(cal.time)
+
+            // Skip days that are already fully calculated
+            if (db.azanTimeDao().getCountForDate(dateStr) >= 5) continue
+
+            val timesMs = computePrayerTimes(latitude, longitude, cal, methodName)
+            PRAYER_NAMES.forEachIndexed { idx, name ->
+                val c = Calendar.getInstance().apply { timeInMillis = timesMs[idx] }
+                toInsert.add(
+                    AzanTime(
+                        prayerName = name,
+                        hour = c.get(Calendar.HOUR_OF_DAY),
+                        minute = c.get(Calendar.MINUTE),
+                        date = dateStr,
+                        isEnabled = true
+                    )
+                )
+            }
+        }
+
+        if (toInsert.isNotEmpty()) {
+            db.azanTimeDao().insertAll(toInsert)
+        }
+
+        // Schedule today's remaining prayers from the now-populated DB
+        scheduleFromDb(db, alarmManager, todayStr)
+    }
+
+    /**
+     * Schedules today's prayer alarms. Uses DB cache when available (offline), otherwise
+     * calculates fresh and stores results.
+     */
     suspend fun calculateAndSchedule(
         latitude: Double,
         longitude: Double,
@@ -49,26 +109,77 @@ class AzanScheduler(private val context: Context) {
         val today = Calendar.getInstance()
         val todayStr = DATE_FORMAT.format(today.time)
 
-        db.azanTimeDao().deleteForDate(todayStr)
-
-        val timesMs = computePrayerTimes(latitude, longitude, today, methodName)
-        val result = mutableListOf<AzanTime>()
-
-        PRAYER_NAMES.forEachIndexed { index, name ->
-            val ms = timesMs[index]
-            val c = Calendar.getInstance().apply { timeInMillis = ms }
-            val entity = AzanTime(
-                prayerName = name,
-                hour = c.get(Calendar.HOUR_OF_DAY),
-                minute = c.get(Calendar.MINUTE),
-                date = todayStr,
-                isEnabled = true
-            )
-            val id = db.azanTimeDao().insert(entity)
-            result.add(entity.copy(id = id))
-            scheduleAzanAlarm(id, name, ms, alarmManager)
+        // Use DB cache if available — avoids re-calculation and GPS dependency
+        val existing = db.azanTimeDao().getTimesForDateOnce(todayStr)
+        val times: List<AzanTime> = if (existing.size >= 5) {
+            existing
+        } else {
+            // Calculate fresh and store
+            db.azanTimeDao().deleteForDate(todayStr)
+            val timesMs = computePrayerTimes(latitude, longitude, today, methodName)
+            val result = mutableListOf<AzanTime>()
+            PRAYER_NAMES.forEachIndexed { index, name ->
+                val ms = timesMs[index]
+                val c = Calendar.getInstance().apply { timeInMillis = ms }
+                val entity = AzanTime(
+                    prayerName = name,
+                    hour = c.get(Calendar.HOUR_OF_DAY),
+                    minute = c.get(Calendar.MINUTE),
+                    date = todayStr,
+                    isEnabled = true
+                )
+                val id = db.azanTimeDao().insert(entity)
+                result.add(entity.copy(id = id))
+            }
+            result
         }
-        return result
+
+        // Schedule future alarms for today's prayers
+        times.forEach { azanTime ->
+            val triggerMs = azanTimeToMs(azanTime)
+            if (triggerMs > System.currentTimeMillis()) {
+                scheduleAzanAlarm(azanTime.id, azanTime.prayerName, triggerMs, alarmManager)
+            }
+        }
+        return times
+    }
+
+    /**
+     * Called after Isha fires: schedules tomorrow's prayer alarms from the pre-calculated DB.
+     * If tomorrow is not yet in the DB (e.g., 30-day window expired), recalculates using GPS.
+     */
+    suspend fun scheduleTomorrow(latitude: Double, longitude: Double, methodName: String) {
+        val db = AppDatabase.getInstance(context)
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val tomorrow = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+        val tomorrowStr = DATE_FORMAT.format(tomorrow.time)
+
+        val existing = db.azanTimeDao().getTimesForDateOnce(tomorrowStr)
+        if (existing.size >= 5) {
+            // Schedule from pre-calculated DB — no GPS needed
+            existing.forEach { azanTime ->
+                val triggerMs = azanTimeToMs(azanTime)
+                if (triggerMs > System.currentTimeMillis()) {
+                    scheduleAzanAlarm(azanTime.id, azanTime.prayerName, triggerMs, alarmManager)
+                }
+            }
+        } else if (latitude != 0.0 || longitude != 0.0) {
+            // Cache expired or not yet pre-calculated — recalculate
+            val timesMs = computePrayerTimes(latitude, longitude, tomorrow, methodName)
+            PRAYER_NAMES.forEachIndexed { index, name ->
+                val ms = timesMs[index]
+                val c = Calendar.getInstance().apply { timeInMillis = ms }
+                val entity = AzanTime(
+                    prayerName = name,
+                    hour = c.get(Calendar.HOUR_OF_DAY),
+                    minute = c.get(Calendar.MINUTE),
+                    date = tomorrowStr,
+                    isEnabled = true
+                )
+                val id = db.azanTimeDao().insert(entity)
+                scheduleAzanAlarm(id, name, ms, alarmManager)
+            }
+        }
     }
 
     fun getPrayerTimesDisplay(
@@ -88,7 +199,7 @@ class AzanScheduler(private val context: Context) {
 
     fun cancelAllAzanAlarms() {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        for (i in AZAN_REQUEST_CODE_BASE until AZAN_REQUEST_CODE_BASE + 20) {
+        for (i in AZAN_REQUEST_CODE_BASE until AZAN_REQUEST_CODE_BASE + 200) {
             val intent = Intent(context, AlarmReceiver::class.java).apply {
                 action = "com.example.school_bell.ACTION_BELL_ALARM"
             }
@@ -98,6 +209,34 @@ class AzanScheduler(private val context: Context) {
             )
             pi?.let { alarmManager.cancel(it) }
         }
+    }
+
+    // ── Internal helpers ──────────────────────────────────────────────────────
+
+    /** Schedules alarms for all remaining prayers today from the DB. */
+    private suspend fun scheduleFromDb(
+        db: AppDatabase,
+        alarmManager: AlarmManager,
+        dateStr: String
+    ) {
+        val times = db.azanTimeDao().getTimesForDateOnce(dateStr)
+        times.forEach { azanTime ->
+            val triggerMs = azanTimeToMs(azanTime)
+            if (triggerMs > System.currentTimeMillis()) {
+                scheduleAzanAlarm(azanTime.id, azanTime.prayerName, triggerMs, alarmManager)
+            }
+        }
+    }
+
+    /** Converts an AzanTime entity to epoch milliseconds using its stored date. */
+    private fun azanTimeToMs(azanTime: AzanTime): Long {
+        val cal = Calendar.getInstance()
+        cal.time = DATE_FORMAT.parse(azanTime.date) ?: return 0L
+        cal.set(Calendar.HOUR_OF_DAY, azanTime.hour)
+        cal.set(Calendar.MINUTE, azanTime.minute)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
     }
 
     // ── Astronomical computation ──────────────────────────────────────────────

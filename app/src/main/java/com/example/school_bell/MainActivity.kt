@@ -5,6 +5,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -33,6 +36,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var preferences: AppPreferences
     private lateinit var kioskManager: KioskManager
+    private var kioskActive = false
 
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -81,12 +85,55 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-apply kiosk mode if it should be active
         lifecycleScope.launch {
             val kioskEnabled = preferences.isKioskEnabled.first()
-            if (kioskEnabled && kioskManager.isAdminActive && !kioskManager.isInLockTaskMode()) {
-                kioskManager.startKioskMode(this@MainActivity)
+            kioskActive = kioskEnabled
+            if (kioskEnabled) {
+                hideSystemUI()
+                if (kioskManager.isAdminActive && !kioskManager.isInLockTaskMode()) {
+                    kioskManager.startKioskMode(this@MainActivity)
+                }
             }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && kioskActive) {
+            hideSystemUI()
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (kioskActive) return  // Block back button in kiosk mode
+        @Suppress("DEPRECATION")
+        super.onBackPressed()
+    }
+
+    /**
+     * Hides status bar and navigation bar for full kiosk immersive mode.
+     * On API 30+ uses WindowInsetsController; falls back to legacy flags on older versions.
+     */
+    private fun hideSystemUI() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.insetsController?.let { controller ->
+                controller.hide(
+                    WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars()
+                )
+                controller.systemBarsBehavior =
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                )
         }
     }
 
